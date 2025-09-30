@@ -7,12 +7,45 @@ from pathlib import Path
 import torch
 import runpod
 from pydub import AudioSegment
+from huggingface_hub import snapshot_download
 
 WORKDIR = Path("/workspace")
 INF_DIR = WORKDIR / "InfiniteTalk"
 WEIGHTS = WORKDIR / "weights"
 INPUTS = WORKDIR / "inputs"
 OUTPUTS = WORKDIR / "outputs"
+
+WAN_DIR = WEIGHTS / "Wan2.1-I2V-14B-480P"
+W2V_DIR = WEIGHTS / "chinese-wav2vec2-base"
+IT_DIR = WEIGHTS / "InfiniteTalk" / "single"
+
+
+def ensure_weights():
+    # Wan I2V (оставим минимальный набор файлов)
+    if not WAN_DIR.exists() or not any(WAN_DIR.iterdir()):
+        snapshot_download(
+            repo_id="Wan-AI/Wan2.1-I2V-14B-480P",
+            local_dir=WAN_DIR.as_posix(),
+            local_dir_use_symlinks=False,
+            allow_patterns=["*.safetensors","*.json","*.txt","*.model","*.bin"]
+        )
+    # wav2vec
+    if not W2V_DIR.exists() or not any(W2V_DIR.iterdir()):
+        snapshot_download(
+            repo_id="TencentGameMate/chinese-wav2vec2-base",
+            local_dir=W2V_DIR.as_posix(),
+            local_dir_use_symlinks=False,
+            allow_patterns=["*.safetensors","*.bin","*.json","*.txt","*.model"]
+        )
+    # InfiniteTalk single (нужен файл infinitetalk.safetensors)
+    it_single = IT_DIR / "infinitetalk.safetensors"
+    if not it_single.exists():
+        snapshot_download(
+            repo_id="MeiGen-AI/InfiniteTalk",
+            local_dir=(WEIGHTS / "InfiniteTalk").as_posix(),
+            local_dir_use_symlinks=False,
+            allow_patterns=["**/single/infinitetalk.safetensors"]
+        )
 
 
 def _b64_to_bytes(data_b64: str) -> bytes:
@@ -146,4 +179,7 @@ def handler(event):
     except Exception as e:
         return {"status": "FAILED", "error": str(e)}
 
-runpod.serverless.start({"handler": handler})
+
+if __name__ == '__main__':
+    ensure_weights()
+    runpod.serverless.start({'handler': handler})
