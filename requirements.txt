@@ -1,0 +1,8 @@
+diffusers==0.30.3
+transformers==4.44.2
+accelerate==0.34.2
+safetensors==0.4.5
+easydict==1.13
+einops==0.8.0
+tqdm==4.66.4
+pyyaml==6.0.2
