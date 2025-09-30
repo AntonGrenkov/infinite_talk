@@ -1,3 +1,4 @@
+# CUDA 12.1 devel (есть nvcc для сборки flash-attn)
 FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -8,45 +9,83 @@ ENV DEBIAN_FRONTEND=noninteractive \
     WORKDIR=/workspace
 
 WORKDIR ${WORKDIR}
+SHELL ["/bin/bash", "-lc"]
 
-# build deps + system
+# ===== system =====
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.10 python3.10-venv python3.10-distutils python3.10-dev \
-    git git-lfs curl ca-certificates \
-    ffmpeg libsndfile1 \
+    curl ca-certificates git git-lfs \
     build-essential ninja-build cmake \
+    libsndfile1 \
  && rm -rf /var/lib/apt/lists/* && git lfs install
 
-# pip toolchain (пины важны для flash-attn)
-RUN curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3.10
-RUN python3.10 -m pip install --no-cache-dir --upgrade "pip<24.1" "setuptools<70" wheel "numpy==1.26.4"
+# ===== Miniconda =====
+RUN curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_24.7.1-0-Linux-x86_64.sh -o /tmp/miniconda.sh \
+ && bash /tmp/miniconda.sh -b -p /opt/conda \
+ && rm -f /tmp/miniconda.sh
+ENV PATH=/opt/conda/bin:$PATH
 
-# PyTorch cu121
-RUN python3.10 -m pip install --no-cache-dir \
-  "torch==2.4.1" "torchvision==0.19.1" "torchaudio==2.4.1" --index-url https://download.pytorch.org/whl/cu121
-RUN python3.10 -m pip install --no-cache-dir \
-  "xformers==0.0.28" --index-url https://download.pytorch.org/whl/cu121
+# =========================================================
+# 1) Create conda env and install PyTorch + xformers (cu121)
+# =========================================================
+RUN conda create -y -n multitalk python=3.10 && conda clean -afy
+ENV CONDA_DEFAULT_ENV=multitalk
+ENV PATH=/opt/conda/envs/multitalk/bin:/opt/conda/bin:$PATH
+ENV PIP_NO_CACHE_DIR=1
 
-# прочие зависимости
-RUN python3.10 -m pip install --no-cache-dir packaging psutil huggingface_hub[cli] librosa soundfile pillow scipy pydub runpod
+# PyTorch/cu121
+RUN pip install \
+  torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+  --index-url https://download.pytorch.org/whl/cu121
 
-# flash-attn (если будет долго/падает — см. заметки ниже)
-RUN python3.10 -m pip install --no-cache-dir flash_attn==2.7.4.post1
+# xformers/cu121
+RUN pip install -U xformers==0.0.28 --index-url https://download.pytorch.org/whl/cu121
 
-# код
+# ===============================
+# 2) Flash-attn installation (order)
+# ===============================
+# (ровно как в инструкции: misaki[en] → ninja → psutil → packaging → wheel → flash_attn)
+RUN pip install "misaki[en]"
+RUN pip install ninja
+RUN pip install psutil
+RUN pip install packaging
+RUN pip install wheel
+RUN pip install flash_attn==2.7.4.post1
+
+# =======================
+# 3) Other dependencies
+# =======================
+RUN pip install easydict einops pyyaml tqdm
+COPY requirements.txt /workspace/requirements.txt
+RUN pip install -r /workspace/requirements.txt
+# librosa через conda-forge
+RUN conda install -y -n multitalk -c conda-forge librosa && conda clean -afy
+
+# ===================
+# 4) FFmpeg via conda
+# ===================
+RUN conda install -y -n multitalk -c conda-forge ffmpeg && conda clean -afy
+
+# ===== extra tools for runtime model download =====
+RUN pip install "huggingface_hub[cli]" hf-transfer pydub runpod
+
+# ===== project code =====
+# (при необходимости: RUN git clone .../InfiniteTalk.git /workspace/InfiniteTalk)
+# если репо уже смонтируешь — эту строку можно убрать
 RUN git clone https://github.com/MeiGen-AI/InfiniteTalk.git /workspace/InfiniteTalk
 
-# пути под веса и данные
+COPY server.py /workspace/server.py
+
+# ускорение загрузок HF (опционально)
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+# передай токен при необходимости (секретом в Runpod), если какие-то репы гейтятся
+# ENV HF_TOKEN=...
+
+# не тянем модели на этапе build!
+# директории под веса и данные
 RUN mkdir -p /workspace/weights/Wan2.1-I2V-14B-480P \
              /workspace/weights/chinese-wav2vec2-base \
              /workspace/weights/InfiniteTalk/single \
              /workspace/inputs /workspace/outputs
 
-# НЕ СКАЧИВАЕМ ВЕСА ВО ВРЕМЯ СБОРКИ!
-
-COPY server.py /workspace/server.py
-
-# можно задать токен на рантайме (если репо приватные/гейт)
-# ENV HF_TOKEN=...
-
-CMD ["python3.10", "/workspace/server.py"]
+# unbuffered вывод логов
+CMD ["python", "-u", "/workspace/server.py"]

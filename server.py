@@ -27,7 +27,13 @@ def ensure_weights():
             repo_id="Wan-AI/Wan2.1-I2V-14B-480P",
             local_dir=WAN_DIR.as_posix(),
             local_dir_use_symlinks=False,
-            allow_patterns=["*.safetensors","*.json","*.txt","*.model","*.bin"]
+            allow_patterns=[
+                "*.safetensors",
+                "*.json",
+                "*.txt",
+                "*.model",
+                "*.bin"
+            ]
         )
     # wav2vec
     if not W2V_DIR.exists() or not any(W2V_DIR.iterdir()):
@@ -35,7 +41,13 @@ def ensure_weights():
             repo_id="TencentGameMate/chinese-wav2vec2-base",
             local_dir=W2V_DIR.as_posix(),
             local_dir_use_symlinks=False,
-            allow_patterns=["*.safetensors","*.bin","*.json","*.txt","*.model"]
+            allow_patterns=[
+                "*.safetensors",
+                "*.bin",
+                "*.json",
+                "*.txt",
+                "*.model"
+            ]
         )
     # InfiniteTalk single (нужен файл infinitetalk.safetensors)
     it_single = IT_DIR / "infinitetalk.safetensors"
